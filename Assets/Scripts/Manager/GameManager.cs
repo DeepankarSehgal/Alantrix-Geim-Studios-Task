@@ -11,6 +11,7 @@ public class GameManager : MonoBehaviour
     public GameObject cardPrefab;
     public Transform gridParent;
     public TMP_Text scoreText;
+    public TMP_Text comboText;
     public GameObject Win;
 
     [Header("Grid Settings")]
@@ -24,6 +25,7 @@ public class GameManager : MonoBehaviour
     List<Card> allCards = new();
     List<Card> flipped = new();
     int score;
+    int comboCount = 1;
 
     const string SAVE_KEY = "CardMatch_Save";
 
@@ -43,10 +45,14 @@ public class GameManager : MonoBehaviour
         int total = rows * cols;
         int pairs = Mathf.Min(cardSprites.Count, total / 2);
 
-        // Build and shuffle ID list
+        // Build and shuffle IDs
         List<int> ids = new();
         for (int i = 0; i < pairs; i++) { ids.Add(i); ids.Add(i); }
-        for (int i = 0; i < ids.Count; i++) (ids[i], ids[Random.Range(i, ids.Count)]) = (ids[Random.Range(i, ids.Count)], ids[i]);
+        for (int i = 0; i < ids.Count; i++)
+        {
+            int rand = Random.Range(i, ids.Count);
+            (ids[i], ids[rand]) = (ids[rand], ids[i]);
+        }
 
         // Spawn cards
         for (int i = 0; i < total; i++)
@@ -84,10 +90,19 @@ public class GameManager : MonoBehaviour
     IEnumerator Match(Card a, Card b)
     {
         a.isMatched = b.isMatched = true;
-        score += 100; UpdateScore();
+
+        int comboBonus = 100 * comboCount;
+        score += comboBonus;
+
+        UpdateScore();
         PlaySFX(matchSFX);
+        Debug.Log($"Combo x{comboCount}! +{comboBonus} points");
+        comboCount++; // increase combo chain
+
         yield return new WaitForSeconds(0.25f);
-        flipped.Remove(a); flipped.Remove(b);
+        flipped.Remove(a);
+        flipped.Remove(b);
+
         SaveProgress();
         CheckGameOver();
     }
@@ -95,20 +110,30 @@ public class GameManager : MonoBehaviour
     IEnumerator Mismatch(Card a, Card b)
     {
         yield return new WaitForSeconds(0.6f);
-        a.ResetCard(); b.ResetCard();
-        flipped.Remove(a); flipped.Remove(b);
+        comboCount = 1; // reset combo chain
+        a.ResetCard();
+        b.ResetCard();
+        flipped.Remove(a);
+        flipped.Remove(b);
         score = Mathf.Max(0, score - 5);
         UpdateScore();
         PlaySFX(mismatchSFX);
         SaveProgress();
     }
 
-    void UpdateScore() => scoreText.text = $"Score: {score}";
+    void UpdateScore()
+    {
+        if (scoreText != null)
+            scoreText.text = $"Score: {score}";
+        if (comboText != null)
+            comboText.text = comboCount > 1 ? $"Combo x{comboCount}" : "";
+    }
 
     void PlaySFX(AudioClip clip)
     {
-        if (clip != null && audioSource != null)
-            audioSource.PlayOneShot(clip);
+        if (clip == null || audioSource == null) return;
+        audioSource.pitch = Random.Range(0.95f, 1.05f);
+        audioSource.PlayOneShot(clip);
     }
 
     void CheckGameOver()
@@ -124,15 +149,17 @@ public class GameManager : MonoBehaviour
     #region Save / Load System
     void SaveProgress()
     {
-        SaveData data = new();
+        SaveData data = new()
+        {
+            score = score,
+            comboCount = comboCount,
+            cardOrder = new(),
+            matchedIndexes = new()
+        };
 
-        data.score = score;
-
-        data.cardOrder = new List<int>();
         foreach (var c in allCards)
             data.cardOrder.Add(c.id);
 
-        data.matchedIndexes = new List<int>();
         for (int i = 0; i < allCards.Count; i++)
             if (allCards[i].isMatched)
                 data.matchedIndexes.Add(i);
@@ -141,17 +168,15 @@ public class GameManager : MonoBehaviour
         PlayerPrefs.Save();
     }
 
-
     void LoadProgress()
     {
         if (!PlayerPrefs.HasKey(SAVE_KEY)) return;
 
         SaveData data = JsonUtility.FromJson<SaveData>(PlayerPrefs.GetString(SAVE_KEY));
-
         score = data.score;
+        comboCount = data.comboCount;
         UpdateScore();
 
-        // rebuild cards to match saved layout
         for (int i = 0; i < allCards.Count; i++)
             allCards[i].SetCard(cardSprites[data.cardOrder[i]], data.cardOrder[i]);
 
@@ -162,7 +187,7 @@ public class GameManager : MonoBehaviour
             card.Flip(true);
         }
     }
-
+    #endregion
 
     public void ClearProgressAndRestart()
     {
@@ -174,8 +199,8 @@ public class GameManager : MonoBehaviour
     class SaveData
     {
         public int score;
-        public List<int> cardOrder;       // card IDs in grid order
-        public List<int> matchedIndexes;  // positions of matched cards
+        public int comboCount;
+        public List<int> cardOrder;
+        public List<int> matchedIndexes;
     }
-    #endregion
 }
